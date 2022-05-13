@@ -106,6 +106,7 @@ pub mod commands;
 pub mod crypto;
 pub mod error;
 pub mod merkle;
+pub mod raw;
 pub mod solana;
 pub mod status;
 pub mod transaction;
