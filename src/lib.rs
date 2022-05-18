@@ -101,6 +101,7 @@ use tokio::{
 };
 use url::Url;
 
+pub mod api;
 pub mod bundle;
 pub mod commands;
 pub mod crypto;
