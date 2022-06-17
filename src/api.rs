@@ -27,6 +27,8 @@ pub trait ArweaveApi {
     ) -> Result<Status, Error>;
 
     async fn get_status(&self, id: &Base64) -> Result<Status, Error>;
+
+    async fn get_price(&self, bytes: &u64) -> Result<(BigUint, BigUint, BigUint), Error>;
 }
 
 #[async_trait]
@@ -65,5 +67,9 @@ impl ArweaveApi for Arweave {
 
     async fn get_status(&self, id: &Base64) -> Result<Status, Error> {
         self.get_status(id).await
+    }
+
+    async fn get_price(&self, bytes: &u64) -> Result<(BigUint, BigUint, BigUint), Error> {
+        self.get_price(bytes).await
     }
 }
