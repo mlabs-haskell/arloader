@@ -70,14 +70,12 @@
 //! #### Solana
 //! The functions for allowing payment to be made in SOL can be found in the [`solana`] module.
 
-use blake3;
 use chrono::Utc;
 use futures::{
     future::{try_join, try_join_all},
     stream, Stream, StreamExt,
 };
 use glob::glob;
-use infer;
 use log::debug;
 use num_bigint::BigUint;
 use rayon::prelude::*;
@@ -124,6 +122,7 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 /// Winstons are a sub unit of the native Arweave network token, AR. There are 10<sup>12</sup> Winstons per AR.
 pub const WINSTONS_PER_AR: u64 = 1_000_000_000_000;
+pub const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
 /// Block size used for pricing calculations = 256 KB
 pub const BLOCK_SIZE: u64 = 1024 * 256;
@@ -343,6 +342,23 @@ pub fn file_stem_is_valid_txid(file_path: &PathBuf) -> bool {
 // Arweave
 //=========================
 
+// Minimum transaction price for a given number of bytes at a given point in time,
+// and current spot prices for arweave and solana in USD (cents)
+pub struct BytesPrice {
+    pub winstons: u64,
+    pub us_cents_per_arweave: u64,
+    pub us_cents_per_solana: u64,
+}
+
+impl BytesPrice {
+    pub fn lamports(&self) -> u64 {
+        let solana_per_aweave = self.us_cents_per_arweave as f64 / self.us_cents_per_solana as f64;
+        let lamports_per_winston =
+            solana_per_aweave * LAMPORTS_PER_SOL as f64 / WINSTONS_PER_AR as f64;
+        (self.winstons as f64 * lamports_per_winston) as u64
+    }
+}
+
 /// Struct with methods for interacting with the Arweave network.
 pub struct Arweave {
     pub name: String,
@@ -398,27 +414,27 @@ impl Arweave {
 
     /// Returns price of uploading data to the network in winstons and USD per AR and USD per SOL
     /// as a BigUint with two decimals.
-    pub async fn get_price(&self, bytes: &u64) -> Result<(BigUint, BigUint, BigUint), Error> {
+    pub async fn get_price(&self, bytes: &u64) -> Result<BytesPrice, Error> {
         let url = self.base_url.join("price/")?.join(&bytes.to_string())?;
-        let winstons_per_bytes = reqwest::get(url)
+        let winstons = reqwest::get(url)
             .await
             .map_err(|e| Error::ArweaveGetPriceError(e))?
             .json::<u64>()
             .await?;
-        let winstons_per_bytes = BigUint::from(winstons_per_bytes);
-
         let oracle_url =
             "https://api.coingecko.com/api/v3/simple/price?ids=arweave,solana&vs_currencies=usd";
-        let prices = reqwest::get(oracle_url)
+
+        let oracle_price = reqwest::get(oracle_url)
             .await
             .map_err(|e| Error::OracleGetPriceError(e))?
             .json::<OraclePrice>()
             .await?;
 
-        let usd_per_ar: BigUint = BigUint::from((prices.arweave.usd * 100.0).floor() as u32);
-        let usd_per_sol: BigUint = BigUint::from((prices.solana.usd * 100.0).floor() as u32);
-
-        Ok((winstons_per_bytes, usd_per_ar, usd_per_sol))
+        Ok(BytesPrice {
+            winstons,
+            us_cents_per_arweave: (oracle_price.arweave.usd * 100.0) as u64,
+            us_cents_per_solana: (oracle_price.solana.usd * 100.0) as u64,
+        })
     }
 
     /// Gets base and incremental prices for a 256 KB block of data.
@@ -428,8 +444,8 @@ impl Arweave {
             self.get_price(&(256 * 1024 * 2)),
         )
         .await?;
-        let base = (prices1.0.to_u64_digits()[0] as f32 * reward_mult) as u64;
-        let incremental = (prices2.0.to_u64_digits()[0] as f32 * reward_mult) as u64 - &base;
+        let base = (prices1.winstons as f32 * reward_mult) as u64;
+        let incremental = (prices2.winstons as f32 * reward_mult) as u64 - &base;
         Ok((base, incremental))
     }
 
@@ -1781,7 +1797,7 @@ mod tests {
         error::Error,
         transaction::{Base64, FromUtf8Strs, Tag},
         utils::TempDir,
-        Arweave, Status,
+        Arweave, BytesPrice, Status, LAMPORTS_PER_SOL, WINSTONS_PER_AR,
     };
     use futures::future::try_join_all;
     use glob::glob;
@@ -1789,6 +1805,16 @@ mod tests {
     use std::{path::PathBuf, str::FromStr, time::Instant};
     use tokio::fs;
     use url::Url;
+
+    #[tokio::test]
+    async fn test_price_calculation() {
+        let price = BytesPrice {
+            winstons: 12 * WINSTONS_PER_AR,
+            us_cents_per_arweave: 1000,
+            us_cents_per_solana: 4000,
+        };
+        assert_eq!(price.lamports(), 3 * LAMPORTS_PER_SOL);
+    }
 
     #[tokio::test]
     async fn test_cannot_post_unsigned_transaction() -> Result<(), Error> {

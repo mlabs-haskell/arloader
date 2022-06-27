@@ -166,7 +166,7 @@ impl VerboseDisplay for Status {
                 "confirms:", raw_status.number_of_confirmations
             )?;
         };
-        writeln!(w, "")
+        writeln!(w)
     }
 }
 
@@ -276,7 +276,7 @@ impl VerboseDisplay for BundleStatus {
                 "confirms:", raw_status.number_of_confirmations
             )?;
         };
-        writeln!(w, "")
+        writeln!(w)
     }
 }
 
