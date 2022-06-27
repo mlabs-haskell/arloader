@@ -46,7 +46,7 @@ where
     IP: Iterator<Item = PathBuf> + Send + Sync,
 {
     let (base, incremental) = arweave.get_price_terms(reward_mult).await?;
-    let (_, usd_per_ar, usd_per_sol) = arweave.get_price(&1).await?;
+    let price = arweave.get_price(&1).await?;
 
     let units = match with_sol {
         true => "lamports",
@@ -99,8 +99,8 @@ where
 
     // get usd cost based on calculated cost
     let usd_cost = match with_sol {
-        true => (&cost * &usd_per_sol).to_f32().unwrap() / 1e11_f32,
-        false => (&cost * &usd_per_ar).to_f32().unwrap() / 1e14_f32,
+        true => (cost * price.us_cents_per_solana).to_f32().unwrap() / 1e11_f32,
+        false => (cost * price.us_cents_per_arweave).to_f32().unwrap() / 1e14_f32,
     };
 
     println!(
@@ -981,22 +981,25 @@ pub async fn command_wallet_balance(
         arweave.get_price(&mb)
     );
     let balance = result.0?;
-    let (winstons_per_kb, usd_per_ar, _) = result.1?;
+    let price = result.1?;
 
     let balance_usd = &balance.to_f32().unwrap() / &WINSTONS_PER_AR.to_f32().unwrap()
-        * &usd_per_ar.to_f32().unwrap()
+        * &price.us_cents_per_arweave.to_f32().unwrap()
         / 100_f32;
 
-    let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
+    let usd_per_kb = (&price.winstons * &price.us_cents_per_arweave)
+        .to_f32()
+        .unwrap()
+        / 1e14_f32;
 
     println!(
             "Wallet balance is {} {units} (${balance_usd:.2} at ${ar_price:.2} USD per AR). At the current price of {price} {units} per MB (${usd_price:.4}), you can upload {max} MB of data.",
             &balance,
             units = arweave.units,
-            max = &balance / &winstons_per_kb,
-            price = &winstons_per_kb,
+            max = &balance / &price.winstons,
+            price = &price.winstons,
             balance_usd = balance_usd,
-            ar_price = &usd_per_ar.to_f32().unwrap()
+            ar_price = &price.us_cents_per_arweave.to_f32().unwrap()
             / 100_f32,
             usd_price = usd_per_kb
     );
